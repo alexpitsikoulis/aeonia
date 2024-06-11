@@ -22,6 +22,7 @@ pub struct Block {
     previous_hash: String,
     timestamp: i64,
     transactions: Vec<Transaction>,
+    miner: String,
 }
 
 impl Block {
@@ -30,12 +31,14 @@ impl Block {
         previous_hash: String,
         transactions: Vec<Transaction>,
         timestamp: i64,
+        miner: String,
     ) -> Self {
         Block {
             nonce,
             previous_hash,
             timestamp,
             transactions,
+            miner,
         }
     }
 
@@ -60,12 +63,16 @@ impl Block {
     pub fn transactions(&self) -> &Vec<Transaction> {
         &self.transactions
     }
+
+    pub fn miner(&self) -> &String {
+        &self.miner
+    }
 }
 
 impl Default for Block {
     fn default() -> Self {
         let timestamp = Utc::now().timestamp_nanos_opt().unwrap();
-        let mut b = Block::new(0, String::new(), vec![], timestamp);
+        let mut b = Block::new(0, String::new(), vec![], timestamp, "none".into());
         let json = serde_json::to_string(&b).unwrap();
         b.previous_hash = sha256::digest(json);
         b

@@ -25,17 +25,21 @@ impl From<Error> for std::io::Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct Blockchain {
+    address: String,
     chain: Arc<Mutex<Vec<Arc<Block>>>>,
     transaction_pool: Arc<Mutex<Vec<Transaction>>>,
     mining_difficulty: u8,
+    mining_reward: f64,
 }
 
 impl Blockchain {
-    pub fn new(mining_difficulty: u8) -> Result<Self> {
+    pub fn new(address: String, mining_difficulty: u8, mining_reward: f64) -> Result<Self> {
         let mut blockchain = Blockchain {
+            address,
             chain: Arc::new(Mutex::new(vec![])),
             transaction_pool: Arc::new(Mutex::new(vec![])),
             mining_difficulty,
+            mining_reward,
         };
         blockchain.add_block(0)?;
         Ok(blockchain)
@@ -48,7 +52,7 @@ impl Blockchain {
         }
     }
 
-    pub fn add_block(&mut self, nonce: i32) -> Result<Arc<Block>> {
+    fn add_block(&mut self, nonce: i32) -> Result<Arc<Block>> {
         let previous_block = self.last_block().unwrap_or_default();
         let previous_hash = previous_block
             .hash()
@@ -66,7 +70,7 @@ impl Blockchain {
             transactions.push(transaction.clone());
         }
         let timestamp = Utc::now().timestamp_nanos_opt().unwrap();
-        let b = Arc::new(Block::new(nonce, previous_hash, transactions, timestamp));
+        let b = Arc::new(Block::new(nonce, previous_hash, transactions, timestamp, self.address.clone()));
         let mut chain_lock = self
             .chain
             .lock()
@@ -90,14 +94,14 @@ impl Blockchain {
         Ok(transaction)
     }
 
-    pub fn valid_proof(
+    fn valid_proof(
         &self,
         nonce: i32,
         previous_hash: String,
         transactions: Vec<Transaction>,
     ) -> bool {
         let zeros = vec!["0"; self.mining_difficulty as usize].join("");
-        let guess_block = Block::new(nonce, previous_hash, transactions, 0);
+        let guess_block = Block::new(nonce, previous_hash, transactions, 0, "none".into());
         if let Ok(guess_json) = serde_json::to_string(&guess_block) {
             let guess_hash = sha256::digest(guess_json);
             guess_hash.starts_with(&zeros)
@@ -106,7 +110,7 @@ impl Blockchain {
         }
     }
 
-    pub fn proof_of_work(&mut self) -> Result<i32> {
+    fn proof_of_work(&mut self) -> Result<i32> {
         let transaction_pool_lock = self
             .transaction_pool
             .lock()
@@ -121,16 +125,28 @@ impl Blockchain {
         }
         Ok(nonce)
     }
+
+    pub fn mining(&mut self) -> bool {
+        if self.add_transation_to_pool("THE BLOCKCHAIN".into(), self.address.clone(), self.mining_reward).is_ok() {
+            if let Ok(nonce) = self.proof_of_work() {
+                self.add_block(nonce).is_ok()
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    }
 }
 
 impl Default for Blockchain {
     fn default() -> Self {
-        match Blockchain::new(3) {
+        match Blockchain::new("0".into(), 3, 1.0) {
             Ok(blockchain) => blockchain,
             Err(e) => {
                 let mut retries = 3;
                 while retries >= 0 {
-                    if let Ok(blockchain) = Blockchain::new(3) {
+                    if let Ok(blockchain) = Blockchain::new("0".into(), 3, 1.0) {
                         return blockchain;
                     } else {
                         retries -= 1;
@@ -151,6 +167,7 @@ impl std::fmt::Display for Blockchain {
             writeln!(f, "\tprevious_hash: {}", block.previous_hash())?;
             writeln!(f, "\ttimestamp: {}", block.timestamp())?;
             writeln!(f, "\ttransactions: {:?}", block.transactions())?;
+            writeln!(f, "\tminer: {:?}", block.miner())?;
             writeln!(f, "{}", vec!["="; 100].join(""))?;
         }
         writeln!(f)?;
