@@ -4,17 +4,20 @@ mod transaction;
 use std::sync::{Arc, Mutex};
 
 use block::Block;
+use chrono::Utc;
 use transaction::Transaction;
 
 #[derive(Debug)]
 pub enum Error {
     MutexPoisonError(String),
+    SerializeJSONError(String),
 }
 
 impl From<Error> for std::io::Error {
     fn from(value: Error) -> Self {
         match value {
             Error::MutexPoisonError(e) => Self::new(std::io::ErrorKind::Other, e),
+            Error::SerializeJSONError(e) => Self::new(std::io::ErrorKind::InvalidData, e),
         }
     }
 }
@@ -23,7 +26,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct Blockchain {
     chain: Arc<Mutex<Vec<Arc<Block>>>>,
-    transaction_pool: Arc<Mutex<Vec<Arc<Transaction>>>>,
+    transaction_pool: Arc<Mutex<Vec<Transaction>>>,
     mining_difficulty: u8,
 }
 
@@ -38,7 +41,7 @@ impl Blockchain {
         Ok(blockchain)
     }
 
-    pub fn last_block(&mut self) -> Option<Arc<Block>> {
+    pub fn last_block(&self) -> Option<Arc<Block>> {
         match self.chain.lock() {
             Ok(chain) => chain.get(chain.len().saturating_sub(1)).cloned(),
             Err(_) => None,
@@ -47,8 +50,9 @@ impl Blockchain {
 
     pub fn add_block(&mut self, nonce: i32) -> Result<Arc<Block>> {
         let previous_block = self.last_block().unwrap_or_default();
-        let previous_block_json = serde_json::to_string(previous_block.as_ref()).unwrap();
-        let previous_hash = sha256::digest(previous_block_json);
+        let previous_hash = previous_block
+            .hash()
+            .map_err(|e| Error::SerializeJSONError(e.to_string()))?;
         let mut transactions: Vec<Transaction> = vec![];
         let mut transaction_pool_lock = self
             .transaction_pool
@@ -59,9 +63,10 @@ impl Blockchain {
                 Some(transaction) => transaction,
                 None => break,
             };
-            transactions.push(transaction.as_ref().clone());
+            transactions.push(transaction.clone());
         }
-        let b = Arc::new(Block::new(nonce, previous_hash, transactions));
+        let timestamp = Utc::now().timestamp_nanos_opt().unwrap();
+        let b = Arc::new(Block::new(nonce, previous_hash, transactions, timestamp));
         let mut chain_lock = self
             .chain
             .lock()
@@ -75,14 +80,46 @@ impl Blockchain {
         sender: String,
         recipient: String,
         amount: f64,
-    ) -> Result<Arc<Transaction>> {
-        let transaction = Arc::new(Transaction::new(sender, recipient, amount));
+    ) -> Result<Transaction> {
+        let transaction = Transaction::new(sender, recipient, amount);
         let mut transaction_pool_lock = self
             .transaction_pool
             .lock()
             .map_err(|e| Error::MutexPoisonError(e.to_string()))?;
         transaction_pool_lock.push(transaction.clone());
         Ok(transaction)
+    }
+
+    pub fn valid_proof(
+        &self,
+        nonce: i32,
+        previous_hash: String,
+        transactions: Vec<Transaction>,
+    ) -> bool {
+        let zeros = vec!["0"; self.mining_difficulty as usize].join("");
+        let guess_block = Block::new(nonce, previous_hash, transactions, 0);
+        if let Ok(guess_json) = serde_json::to_string(&guess_block) {
+            let guess_hash = sha256::digest(guess_json);
+            guess_hash.starts_with(&zeros)
+        } else {
+            false
+        }
+    }
+
+    pub fn proof_of_work(&mut self) -> Result<i32> {
+        let transaction_pool_lock = self
+            .transaction_pool
+            .lock()
+            .map_err(|e| Error::MutexPoisonError(e.to_string()))?;
+        let last_block = self.last_block().unwrap();
+        let previous_hash = last_block
+            .hash()
+            .map_err(|e| Error::SerializeJSONError(e.to_string()))?;
+        let mut nonce = 0;
+        while !self.valid_proof(nonce, previous_hash.clone(), transaction_pool_lock.clone()) {
+            nonce += 1;
+        }
+        Ok(nonce)
     }
 }
 
@@ -94,13 +131,13 @@ impl Default for Blockchain {
                 let mut retries = 3;
                 while retries >= 0 {
                     if let Ok(blockchain) = Blockchain::new(3) {
-                        return blockchain
+                        return blockchain;
                     } else {
                         retries -= 1;
                     }
-                };
+                }
                 panic!("failed to create default blockchain: {:?}", e);
-            },
+            }
         }
     }
 }

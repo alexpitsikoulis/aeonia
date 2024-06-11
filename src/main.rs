@@ -10,8 +10,8 @@ fn main() -> std::io::Result<()> {
     blockchain
         .add_transation_to_pool("harry".into(), "gus".into(), 100.0)
         .unwrap();
-    println!("{}", blockchain);
-    blockchain.add_block(21)?;
+    let nonce = blockchain.proof_of_work().unwrap();
+    blockchain.add_block(nonce)?;
     println!("{}", blockchain);
     Ok(())
 }
