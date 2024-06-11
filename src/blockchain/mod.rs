@@ -24,13 +24,15 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct Blockchain {
     chain: Arc<Mutex<Vec<Arc<Block>>>>,
     transaction_pool: Arc<Mutex<Vec<Arc<Transaction>>>>,
+    mining_difficulty: u8,
 }
 
 impl Blockchain {
-    pub fn new() -> Result<Self> {
+    pub fn new(mining_difficulty: u8) -> Result<Self> {
         let mut blockchain = Blockchain {
             chain: Arc::new(Mutex::new(vec![])),
             transaction_pool: Arc::new(Mutex::new(vec![])),
+            mining_difficulty,
         };
         blockchain.add_block(0)?;
         Ok(blockchain)
@@ -81,6 +83,25 @@ impl Blockchain {
             .map_err(|e| Error::MutexPoisonError(e.to_string()))?;
         transaction_pool_lock.push(transaction.clone());
         Ok(transaction)
+    }
+}
+
+impl Default for Blockchain {
+    fn default() -> Self {
+        match Blockchain::new(3) {
+            Ok(blockchain) => blockchain,
+            Err(e) => {
+                let mut retries = 3;
+                while retries >= 0 {
+                    if let Ok(blockchain) = Blockchain::new(3) {
+                        return blockchain
+                    } else {
+                        retries -= 1;
+                    }
+                };
+                panic!("failed to create default blockchain: {:?}", e);
+            },
+        }
     }
 }
 
