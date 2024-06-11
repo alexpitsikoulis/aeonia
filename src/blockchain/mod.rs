@@ -38,9 +38,7 @@ impl Blockchain {
 
     pub fn last_block(&mut self) -> Option<Arc<Block>> {
         match self.chain.lock() {
-            Ok(chain) => chain
-                .get(chain.len().checked_sub(1).unwrap_or(0))
-                .map(|b| b.clone()),
+            Ok(chain) => chain.get(chain.len().saturating_sub(1)).cloned(),
             Err(_) => None,
         }
     }
@@ -97,19 +95,16 @@ impl std::fmt::Display for Blockchain {
             writeln!(f, "\ttransactions: {:?}", block.transactions())?;
             writeln!(f, "{}", vec!["="; 100].join(""))?;
         }
-        writeln!(f, "")?;
-        match self.transaction_pool.lock() {
-            Ok(transaction_pool) => {
-                writeln!(f, "transaction pool")?;
-                for transaction in transaction_pool.iter() {
-                    writeln!(f, "{}", vec!["-"; 50].join(""))?;
-                    writeln!(f, "\tsender: {}", transaction.sender)?;
-                    writeln!(f, "\trecipient: {}", transaction.recipient)?;
-                    writeln!(f, "\tamount: {}", transaction.amount)?;
-                    writeln!(f, "{}", vec!["-"; 50].join(""))?;
-                }
+        writeln!(f)?;
+        if let Ok(transaction_pool) = self.transaction_pool.lock() {
+            writeln!(f, "transaction pool")?;
+            for transaction in transaction_pool.iter() {
+                writeln!(f, "{}", vec!["-"; 50].join(""))?;
+                writeln!(f, "\tsender: {}", transaction.sender)?;
+                writeln!(f, "\trecipient: {}", transaction.recipient)?;
+                writeln!(f, "\tamount: {}", transaction.amount)?;
+                writeln!(f, "{}", vec!["-"; 50].join(""))?;
             }
-            Err(_) => {}
         };
         writeln!(f, "end\n")?;
         Ok(())
