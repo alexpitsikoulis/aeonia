@@ -2,20 +2,6 @@ use super::transaction::Transaction;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-pub enum Error {
-    SerializeJSONError(String),
-}
-
-impl ToString for Error {
-    fn to_string(&self) -> String {
-        match self {
-            Error::SerializeJSONError(e) => e.clone(),
-        }
-    }
-}
-
-type Result<T> = std::result::Result<T, Error>;
-
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Block {
     nonce: i32,
@@ -42,10 +28,8 @@ impl Block {
         }
     }
 
-    pub fn hash(&self) -> Result<String> {
-        let json =
-            serde_json::to_string(self).map_err(|e| Error::SerializeJSONError(e.to_string()))?;
-        Ok(sha256::digest(json))
+    pub fn hash(&self) -> String {
+        sha256::digest(self.to_string())
     }
 
     pub fn nonce(&self) -> i32 {
@@ -76,5 +60,27 @@ impl Default for Block {
         let json = serde_json::to_string(&b).unwrap();
         b.previous_hash = sha256::digest(json);
         b
+    }
+}
+
+impl ToString for Block {
+    fn to_string(&self) -> String {
+        let transactions: Vec<String> = self.transactions.iter().map(|t| t.to_string()).collect();
+        format!(
+            r#"
+        {{
+            "nonce": {},
+            "previous_hash": "{}",
+            "timestamp": {},
+            "transactions": [{}],
+            "miner": "{}",
+        }}
+        "#,
+            self.nonce,
+            self.previous_hash,
+            self.timestamp,
+            transactions.join(","),
+            self.miner
+        )
     }
 }

@@ -16,3 +16,18 @@ impl Transaction {
         }
     }
 }
+
+impl ToString for Transaction {
+    fn to_string(&self) -> String {
+        format!(
+            r#"
+        {{
+            "sender": "{}",
+            "recipient": "{}",
+            "amount": {}
+        }}
+        "#,
+            self.sender, self.recipient, self.amount
+        )
+    }
+}
