@@ -64,10 +64,10 @@ impl Wallet {
 
     pub fn sign_transaction(
         &mut self,
-        recipient: String,
+        recipient: &String,
         amount: f64,
     ) -> Result<(Transaction, Signature, VerifyingKey)> {
-        let transaction = Transaction::new(self.address.clone(), recipient, amount);
+        let transaction = Transaction::new(self.address.clone(), recipient.clone(), amount);
         let private_key = self
             .private_key
             .parse::<SecretKey>()

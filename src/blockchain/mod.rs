@@ -20,6 +20,7 @@ pub enum Error {
     Json(String),
     Ecdsa(String),
     InvalidSignature(String),
+    AvailableBalanceExceeded(String),
 }
 
 impl From<Error> for std::io::Error {
@@ -29,6 +30,13 @@ impl From<Error> for std::io::Error {
             Error::Json(e) => Self::new(std::io::ErrorKind::InvalidData, e),
             Error::Ecdsa(e) => Self::new(std::io::ErrorKind::Other, e),
             Error::InvalidSignature(e) => Self::new(std::io::ErrorKind::InvalidData, e),
+            Error::AvailableBalanceExceeded(sender) => Self::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "transaction exceeds available balance for sender {}",
+                    sender
+                ),
+            ),
         }
     }
 }
@@ -48,7 +56,8 @@ impl Blockchain {
             chain: Arc::new(Mutex::new(vec![])),
             transaction_pool: Arc::new(Mutex::new(vec![])),
         };
-        blockchain.add_block(0)?;
+        let address = blockchain.wallet.address().clone();
+        blockchain.add_block(0, &address)?;
         Ok(blockchain)
     }
 
@@ -59,7 +68,7 @@ impl Blockchain {
         }
     }
 
-    fn add_block(&mut self, nonce: i32) -> Result<Arc<Block>> {
+    fn add_block(&mut self, nonce: i32, miner: &String) -> Result<Arc<Block>> {
         let previous_block = self.last_block().unwrap_or_default();
         let previous_hash = previous_block.hash();
         let mut transactions: Vec<Transaction> = vec![];
@@ -80,7 +89,7 @@ impl Blockchain {
             previous_hash,
             transactions,
             timestamp,
-            self.wallet.address().clone(),
+            miner.clone(),
         ));
         let mut chain_lock = self
             .chain
@@ -99,6 +108,13 @@ impl Blockchain {
         if let Err(e) = verifying_key.verify(transaction.to_string().as_bytes(), &signature) {
             Err(Error::InvalidSignature(e.to_string()))
         } else {
+            let sender = transaction.clone().sender;
+            if &sender.clone() != self.wallet.address() {
+                let sender_balance = self.calculate_transactions_total(sender.clone())?;
+                if sender_balance < transaction.amount {
+                    return Err(Error::AvailableBalanceExceeded(sender));
+                }
+            }
             let mut transaction_pool_lock = self
                 .transaction_pool
                 .lock()
@@ -106,6 +122,11 @@ impl Blockchain {
             transaction_pool_lock.push(transaction.clone());
             Ok(transaction)
         }
+    }
+
+    pub fn deposit_to_wallet(&mut self, recipient: &String, amount: f64) -> Result<Transaction> {
+        let (transaction, signature, v_key) = self.wallet.sign_transaction(recipient, amount).map_err(|e| Error::Ecdsa(e.to_string()))?;
+        self.add_transation_to_pool(transaction, signature, v_key)
     }
 
     fn valid_proof(
@@ -138,17 +159,16 @@ impl Blockchain {
         Ok(nonce)
     }
 
-    pub fn mining(&mut self) -> bool {
-        if let Ok((transaction, signature, v_key)) = self
-            .wallet
-            .sign_transaction(self.wallet.address().clone(), MINING_REWARD)
+    pub fn mining(&mut self, miner: &String) -> bool {
+        if let Ok((transaction, signature, v_key)) =
+            self.wallet.sign_transaction(miner, MINING_REWARD)
         {
             if self
                 .add_transation_to_pool(transaction, signature, v_key)
                 .is_ok()
             {
                 if let Ok(nonce) = self.proof_of_work() {
-                    self.add_block(nonce).is_ok()
+                    self.add_block(nonce, miner).is_ok()
                 } else {
                     false
                 }
@@ -174,6 +194,15 @@ impl Blockchain {
                 if transaction.sender == address {
                     total_amount -= transaction.amount;
                 }
+            }
+        }
+        let transaction_pool_lock = self.transaction_pool.lock().map_err(|e| Error::MutexPoison(e.to_string()))?;
+        for transaction in transaction_pool_lock.iter() {
+            if transaction.recipient == address {
+                total_amount += transaction.amount;
+            }
+            if transaction.sender == address {
+                total_amount -= transaction.amount;
             }
         }
         Ok(total_amount)
