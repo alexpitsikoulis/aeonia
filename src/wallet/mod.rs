@@ -83,8 +83,4 @@ impl Wallet {
     pub fn address(&self) -> &String {
         &self.address
     }
-
-    pub fn public_key(&self) -> PublicKey {
-        self.public_key
-    }
 }
